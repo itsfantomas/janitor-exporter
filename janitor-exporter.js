@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Janitor AI Suite (Ultimate)
+// @name         Janitor AI Suite
 // @namespace    http://tampermonkey.net/
 // @version      1.4
 // @description  Export JanitorAI chats to TXT/JSONL & Download Character Cards.
@@ -14,7 +14,7 @@
 // @supportURL   https://t.me/fa_Qai
 // ==/UserScript==
 
-/*
+/**
  * 🛡️ SECURITY AUDIT NOTE:
  * This script is a client-side tool for exporting chat history and character cards.
  * 1. It fetches data ONLY from "janitorai.com".
