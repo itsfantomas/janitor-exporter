@@ -34,7 +34,7 @@
 
 После того как у вас появилась иконка "Макаки" в браузере:
 
-1. [**НАЖМИТЕ СЮДА, ЧТОБЫ УСТАНОВИТЬ**](https://www.google.com/search?q=https://github.com/itsfantomas/janitor-exporter/raw/main/janitor-exporter.js)   
+1. [**НАЖМИТЕ СЮДА, ЧТОБЫ СКОПИРОВАТЬ**](https://github.com/itsfantomas/janitor-exporter/blob/main/janitor-exporter.js)   
 2. И делаем как на видео. 
 3. Готово\! 🎉
 
