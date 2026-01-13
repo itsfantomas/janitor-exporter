@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Janitor AI Suite (Ultimate)
+// @name         Janitor AI Suite
 // @namespace    http://tampermonkey.net/
 // @version      2.0
 // @description  Export JanitorAI chats to TXT/JSONL & Download Character Cards & Tracker JSON & Backup Personas.
