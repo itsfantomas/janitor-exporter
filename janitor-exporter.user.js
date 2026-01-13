@@ -19,7 +19,7 @@
 
 /**
  * 🛡️ SECURITY AUDIT NOTE: 
- * This script is a client-side tool. It fetches data ONLY from "janitorai.com".
+ * This script is a client-side tool. It fetches data ONLY from "janitorai.com". 
  * Data is processed locally. JSZip is used for client-side archiving.
  */
 
