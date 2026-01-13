@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Janitor AI Suite
+// @name         Janitor AI Suite (Ultimate)
 // @namespace    http://tampermonkey.net/
 // @version      2.0
 // @description  Export JanitorAI chats to TXT/JSONL & Download Character Cards & Tracker JSON & Backup Personas.
@@ -163,23 +163,11 @@
         }
     });
 
-    // Helper: Скачивание через GM (обход CORS)
-    function downloadImageGM(url) {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: "GET",
-                url: url,
-                responseType: "blob",
-                onload: (response) => {
-                    if (response.status === 200) {
-                        resolve(response.response);
-                    } else {
-                        reject(new Error(`HTTP Error ${response.status}`));
-                    }
-                },
-                onerror: (e) => reject(new Error("Network Error")),
-                ontimeout: () => reject(new Error("Timeout"))
-            });
+    // Helper: Скачивание (CORS может блокировать, но пробуем)
+    function downloadImageFetch(url) {
+        return fetch(url).then((res) => {
+            if (res.ok) { return res.blob(); }
+            throw new Error('Network response was not ok.');
         });
     }
 
@@ -208,11 +196,15 @@
                                 }
                                 return char;
                             }
-                        } catch (e) {}
+                        } catch (e) {
+                            // skip
+                        }
                     }
                 }
             }
-        } catch (e) {}
+        } catch (e) {
+            // skip
+        }
         return null;
     }
 
@@ -227,7 +219,7 @@
                     const startMarker = 'JSON.parse("';
                     const endMarker = '")';
                     const startIndex = script.textContent.indexOf(startMarker);
-                    if (startIndex === -1) continue;
+                    if (startIndex === -1) { continue; }
                     const jsonStart = startIndex + startMarker.length;
                     const endIndex = script.textContent.lastIndexOf(endMarker);
 
@@ -241,7 +233,9 @@
                                     return data[key].personas;
                                 }
                             }
-                        } catch (e) {}
+                        } catch (e) {
+                            // skip
+                        }
                     }
                 }
             }
@@ -253,7 +247,7 @@
 
     // --- 3. ИНТЕРФЕЙС (UI) ---
     function createUI() {
-        if (document.getElementById('jai-suite-panel')) return;
+        if (document.getElementById('jai-suite-panel')) { return; }
 
         const panel = document.createElement('div');
         panel.id = 'jai-suite-panel';
@@ -463,13 +457,33 @@
             return;
         }
 
+        // Поиск DOM картинок для сопоставления
+        const domImages = new Map();
+        const images = document.querySelectorAll('img[alt$=" avatar"]');
+        images.forEach((img) => {
+            // Извлекаем имя из alt: "Name avatar" -> "Name"
+            const name = img.alt.replace(/ avatar$/, '').trim();
+            if (name && img.src) {
+                domImages.set(name, img.src);
+            }
+        });
+
         const modal = document.createElement('div');
         modal.className = 'jai-modal';
 
         let listHtml = '';
         personas.forEach((p, idx) => {
-            let avatar = p.avatar;
-            if (avatar && !avatar.startsWith('http')) avatar = `https://janitorai.com${avatar}`;
+            // Приоритет: картинка со страницы (свежая, CORS-friendly) -> картинка из JSON
+            let avatar = domImages.get(p.name);
+            if (!avatar) {
+                avatar = p.avatar;
+                if (avatar && !avatar.startsWith('http')) {
+                    avatar = `https://janitorai.com${avatar}`;
+                }
+            }
+            // Сохраняем найденный URL прямо в объект, чтобы потом не искать снова
+            p._domAvatarUrl = avatar;
+
             listHtml += `
                 <div class="jai-persona-item">
                     <input type="checkbox" id="p-check-${idx}" checked>
@@ -512,16 +526,16 @@
             const selected = [];
             personas.forEach((p, idx) => {
                 const cb = document.getElementById(`p-check-${idx}`);
-                if (cb && cb.checked) selected.push(p);
+                if (cb && cb.checked) { selected.push(p); }
             });
-            if (selected.length === 0) return;
+            if (selected.length === 0) { return; }
 
             document.body.removeChild(modal);
             await runPersonasBackup(selected);
         };
     }
 
-    // --- 5. ЭКСПОРТ ПЕРСОН ---
+    // --- 5. ЭКСПОРТ ПЕРСОН (ZIP + BEST EFFORT IMAGE) ---
     async function runPersonasBackup(personas) {
         updateStatus("Создание архива...");
         const zip = new JSZip();
@@ -538,9 +552,12 @@
             count++;
             updateStatus(`Обработка: ${count}/${total}`);
 
+            // Чистим имя
             const cleanName = p.name.replace(/[^a-zA-Z0-9]/g, '');
+            // Формат имени как в Tavern: TimeStamp-Name.png
             const fileName = `${Date.now() + count}-${cleanName}.png`;
 
+            // 1. Заполняем JSON
             backupData.personas[fileName] = p.name;
 
             backupData.persona_descriptions[fileName] = {
@@ -550,30 +567,27 @@
                 title: ""
             };
 
-            if (p.avatar) {
+            // 2. Скачиваем картинку (Best Effort)
+            const avatarUrl = p._domAvatarUrl || p.avatar; // Берем URL, который нашли в меню (из DOM или JSON)
+
+            if (avatarUrl) {
                 try {
-                    let avatarUrl = p.avatar;
-                    if (!avatarUrl.startsWith('http')) avatarUrl = `https://janitorai.com${avatarUrl}`;
-
-                    let imgBlob;
-                    try {
-                        imgBlob = await downloadImageGM(avatarUrl);
-                    } catch (e) {
-                        const imgResp = await fetch(avatarUrl);
-                        if (imgResp.ok) imgBlob = await imgResp.blob();
+                    let finalUrl = avatarUrl;
+                    if (!finalUrl.startsWith('http')) {
+                        finalUrl = `https://janitorai.com${finalUrl}`;
                     }
 
-                    if (imgBlob) {
-                        zip.file(fileName, imgBlob);
-                    } else {
-                        console.warn(`[Skip] Image fetch failed for ${p.name}`);
-                    }
+                    // Обычный fetch (без GM)
+                    // Если картинка взята из DOM (Ella), браузер МОЖЕТ отдать её из кэша
+                    const imgResp = await downloadImageFetch(finalUrl);
+                    zip.file(fileName, imgResp);
                 } catch (e) {
-                    console.warn(`[Skip] Error fetching image for ${p.name}`, e);
+                    // console.warn(`[Skip] Image fetch failed for ${p.name}`);
                 }
             }
         }
 
+        // Кладем главный JSON файл
         zip.file("personas_backup.json", JSON.stringify(backupData, null, 2));
 
         updateStatus("Сжатие...");
@@ -593,7 +607,7 @@
 
     // --- ОСТАЛЬНЫЕ ЭКСПОРТЫ ---
     async function runChatExport(format) {
-        if (!CONFIG.token) CONFIG.token = findToken();
+        if (!CONFIG.token) { CONFIG.token = findToken(); }
         const chatIdMatch = window.location.href.match(/chats\/([a-zA-Z0-9-]+)/);
         const chatId = chatIdMatch ? chatIdMatch[1] : null;
         if (!chatId || !CONFIG.token) {
@@ -602,7 +616,7 @@
         }
         updateStatus(t('status_loading'));
         let filename = document.getElementById('jai-filename').value.trim();
-        if (!filename) filename = `janitor_chat_${chatId}`;
+        if (!filename) { filename = `janitor_chat_${chatId}`; }
         try {
             const url = `https://janitorai.com/hampter/chats/${chatId}`;
             const resp = await originalFetch(url, {
@@ -610,10 +624,10 @@
                 headers: { 'Authorization': CONFIG.token, 'Content-Type': 'application/json', 'x-app-version': '7.4.9.9.7' },
                 credentials: 'include'
             });
-            if (!resp.ok) throw new Error("API " + resp.status);
+            if (!resp.ok) { throw new Error("API " + resp.status); }
             const json = await resp.json();
             const msgs = json.chatMessages || json.messages || (Array.isArray(json) ? json : null);
-            if (!msgs) throw new Error("No messages");
+            if (!msgs) { throw new Error("No messages"); }
             msgs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
             let content = '';
             const mimeType = format === 'txt' ? 'text/plain' : 'application/json';
@@ -622,8 +636,8 @@
                     const isBot = msg.is_bot === true;
                     const name = isBot ? 'Char' : 'You';
                     const text = (msg.message || msg.content || '').replace(/<[^>]*>/g, '').trim();
-                    if (!text) return '';
-                    if (i === 0 && isBot) return `${text}\n\n------------------`;
+                    if (!text) { return ''; }
+                    if (i === 0 && isBot) { return `${text}\n\n------------------`; }
                     return `${name}: ${text}`;
                 }).filter(Boolean).join('\n\n');
                 filename += '.txt';
@@ -656,25 +670,20 @@
         if (window.location.href.includes('/characters/')) {
              const urlIdMatch = window.location.href.match(/characters\/([a-f0-9-]+)/);
              if (urlIdMatch && rawData.id && !urlIdMatch[1].includes(rawData.id)) {
-                 if (!confirm(t('alert_old_data'))) return;
+                 if (!confirm(t('alert_old_data'))) { return; }
              }
         }
         updateStatus(t('status_loading'));
         try {
             let avatarUrl = rawData.avatar;
-            if (avatarUrl && !avatarUrl.startsWith('http')) avatarUrl = `https://janitorai.com${avatarUrl}`;
+            if (avatarUrl && !avatarUrl.startsWith('http')) { avatarUrl = `https://janitorai.com${avatarUrl}`; }
             const domImg = document.querySelector('.character-card-flex-avatar img') || document.querySelector('img[alt*="avatar"]');
-            if (domImg && domImg.src) avatarUrl = domImg.src;
+            if (domImg && domImg.src) { avatarUrl = domImg.src; }
 
-            let imgBlob;
-            try {
-               imgBlob = await downloadImageGM(avatarUrl);
-            } catch (e) {
-               const imgResp = await fetch(avatarUrl);
-               imgBlob = await imgResp.blob();
-            }
+            // Only fetch here (Best Effort)
+            const imgResp = await downloadImageFetch(avatarUrl);
+            const imgBitmap = await createImageBitmap(imgResp);
 
-            const imgBitmap = await createImageBitmap(imgBlob);
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             canvas.width = imgBitmap.width;
@@ -718,18 +727,18 @@
         if (window.location.href.includes('/characters/')) {
              const urlIdMatch = window.location.href.match(/characters\/([a-f0-9-]+)/);
              if (urlIdMatch && rawData.id && !urlIdMatch[1].includes(rawData.id)) {
-                 if (!confirm(t('alert_old_data'))) return;
+                 if (!confirm(t('alert_old_data'))) { return; }
              }
         }
         try {
             const status = rawData.is_public ? 'active' : 'private';
             const date = rawData.updated_at ? new Date(rawData.updated_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
             let avatar = rawData.avatar;
-            if (avatar && !avatar.startsWith('http')) avatar = `https://janitorai.com${avatar}`;
+            if (avatar && !avatar.startsWith('http')) { avatar = `https://janitorai.com${avatar}`; }
             const domImg = document.querySelector('.character-card-flex-avatar img') || document.querySelector('img[alt*="avatar"]');
-            if (domImg && domImg.src) avatar = domImg.src;
+            if (domImg && domImg.src) { avatar = domImg.src; }
             let safeDescription = rawData.description || rawData.first_message || "";
-            if (safeDescription.length > 500) safeDescription = safeDescription.substring(0, 500) + "...";
+            if (safeDescription.length > 500) { safeDescription = safeDescription.substring(0, 500) + "..."; }
             const standardTags = rawData.tags ? rawData.tags.map((t) => t.name || t) : [];
             const customTags = rawData.custom_tags ? rawData.custom_tags.map((t) => t.name || t) : [];
             const trackerObj = {
