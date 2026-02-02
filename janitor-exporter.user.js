@@ -4,7 +4,7 @@
 // @version      2.0
 // @description  Export JanitorAI chats to TXT/JSONL & Download Character Cards & Tracker JSON & Backup Personas.
 // @author       [itsfantomas]
-// @copyright    2026 by itsfantomas, [https://t.me/fa_Qai]
+// @copyright    2026 by itsfantomas, [https://t.me/itsfantomaslab]
 // @license      MIT
 // @match        https://janitorai.com/*
 // @grant        none
@@ -12,7 +12,7 @@
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
 // @updateURL    https://github.com/itsfantomas/janitor-exporter/raw/main/janitor-exporter.user.js
 // @downloadURL  https://github.com/itsfantomas/janitor-exporter/raw/main/janitor-exporter.user.js
-// @supportURL   https://t.me/fa_Qai
+// @supportURL   https://t.me/itsfantomaslab
 // ==/UserScript==
 
 /* global JSZip */
