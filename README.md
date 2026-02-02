@@ -88,4 +88,4 @@ https://github.com/user-attachments/assets/684b887c-694f-4c51-a7a4-01885afb0bdc
 
 Сделано с любовью для комьюнити. Все боты для видео взяты рандомно. 
 Автор: \[itsfantomas\]  
-Telegram канал: \[[тут можно задавать вопросы](https://t.me/fa_Qai)\]
+Telegram канал: \[[тут можно задавать вопросы](https://t.me/itsfantomaslab)\]
