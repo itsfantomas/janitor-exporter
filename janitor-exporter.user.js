@@ -688,6 +688,7 @@
 
     // --- 5. ЭКСПОРТ ПЕРСОН (ZIP) ---
     async function runPersonasBackup(personas) {
+        console.log(`[J.AI Suite] 📦 Starting backup for ${personas.length} selected personas...`);
         updateStatus("Создание архива...");
         const zip = new JSZip();
         const backupData = { personas: {}, persona_descriptions: {} };
@@ -696,6 +697,7 @@
         const total = personas.length;
 
         for (const p of personas) {
+            console.log(`[J.AI Suite] -> Processing persona: "${p.name}"`);
             count++;
             updateStatus(`Обработка: ${count}/${total}`);
 
@@ -816,6 +818,7 @@
         const rawData = getPageData();
         updateStatus(t('status_loading'));
         try {
+            console.log(`[J.AI Suite] 🎴 Exporting character card for: "${rawData.name}" (ID: ${rawData.id})`);
             let avatarUrl = rawData.avatar;
             if (avatarUrl && !avatarUrl.startsWith('http')) { avatarUrl = `https://janitorai.com${avatarUrl}`; }
             const domImg = document.querySelector('.character-card-flex-avatar img') || document.querySelector('img[alt*="avatar"]');
@@ -895,6 +898,7 @@
     function processTrackerExport() {
         const rawData = getPageData();
         try {
+            console.log(`[J.AI Suite] 📊 Generating Tracker JSON for: "${rawData.name}"`);
             const status = rawData.is_public ? 'active' : 'private';
             const date = rawData.updated_at ? new Date(rawData.updated_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
             let avatar = rawData.avatar;
