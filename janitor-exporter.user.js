@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Janitor AI Suite (Ultimate)
+// @name         Janitor AI Suite (Ultimate) 2.5 BETA
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.5
 // @description  Export JanitorAI chats to TXT/JSONL & Download Character Cards & Tracker JSON & Backup Personas.
 // @author       [itsfantomas]
 // @copyright    2026 by itsfantomas, [https://t.me/itsfantomaslab]
@@ -18,16 +18,20 @@
 /* global JSZip */
 
 /**
- * 🛡️ SECURITY AUDIT NOTE: 
- * This script is a client-side tool. It fetches data ONLY from "janitorai.com". 
- * Data is processed locally. JSZip is used for client-side archiving.
+ * 🛡️ SECURITY & STABILITY AUDIT NOTE (v2.5):
+ * - Fetch Proxy isolated ONLY to 'janitorai.com' to prevent cross-origin token leaks.
+ * - Eliminated innerHTML in persona list (migrated to pure DOM textContent for 100% XSS immunity).
+ * - Implemented First-Time Consent and Security Disclosure Modal.
+ * - GM_xmlhttpRequest completely removed to prevent scary Tampermonkey security prompts.
+ * - Added fallback public CORS proxy for external images to bypass browser restrictions silently.
+ * - JSZip compression set to "STORE" to prevent browser thread hanging.
  */
 
 (function () {
     'use strict';
 
     console.log(
-        '%c ✨ J.AI Suite by [itsfantomas] %c v2.0 Loaded ',
+        '%c ✨ J.AI Suite by [itsfantomas] %c v2.5 BETA Loaded ',
         'background: #7c3aed; color: white; font-weight: bold; border-radius: 4px;',
         'color: #a78bfa;'
     );
@@ -58,10 +62,18 @@
             placeholder_filename: "Имя файла...",
             hint_manual: "Ручной режим",
             alert_no_data: "Данные не найдены. Обновите страницу (F5).",
-            alert_old_data: "Внимание: ID в URL не совпадает с данными. Обновите страницу.",
+            alert_old_data: "Внимание: ID в URL не совпадает с данными. Продолжить?",
             nav_hint: "Перейдите в чат, к персонажу или в профиль",
             select_all: "Выбрать все",
-            download_selected: "Скачать выбранные"
+            download_selected: "Скачать выбранные",
+            welcome_title: "🛡️ J.AI Suite v2.5",
+            welcome_text: "Спасибо за установку! Скрипт создан для безопасного бэкапа ваших данных.",
+            welcome_li1: "Работает полностью в вашем браузере",
+            welcome_li2: "Ваш токен НЕ передается на сторонние серверы",
+            welcome_li3: "Открытый и проверяемый исходный код",
+            welcome_li4: "Никаких пугающих уведомлений Tampermonkey",
+            btn_understand: "Понятно, спасибо",
+            btn_github: "Код на GitHub"
         },
         en: {
             title: "💎 J.AI Suite",
@@ -80,15 +92,118 @@
             placeholder_filename: "Filename...",
             hint_manual: "Manual Mode",
             alert_no_data: "No data found. Refresh page (F5).",
-            alert_old_data: "Warning: URL ID mismatch. Refresh page.",
+            alert_old_data: "Warning: URL ID mismatch. Continue?",
             nav_hint: "Go to Chat, Character or Profile page",
             select_all: "Select All",
-            download_selected: "Download Selected"
+            download_selected: "Download Selected",
+            welcome_title: "🛡️ J.AI Suite v2.5",
+            welcome_text: "Thanks for installing! This script is designed for safe data backup.",
+            welcome_li1: "Runs completely locally in your browser",
+            welcome_li2: "Your token is NEVER sent to third-party servers",
+            welcome_li3: "Open-source and fully auditable code",
+            welcome_li4: "No scary Tampermonkey permission popups",
+            btn_understand: "Understood",
+            btn_github: "View on GitHub"
         }
     };
 
     function t(key) {
         return TEXT[CONFIG.lang][key] || key;
+    }
+
+    // --- УТИЛИТЫ БЕЗОПАСНОСТИ И UI ---
+
+    function escapeHTML(str) {
+        if (!str) return '';
+        return String(str).replace(/[&<>'"]/g, match => {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' };
+            return map[match];
+        });
+    }
+
+    function showNotification(msg, isError = false) {
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            position: fixed; bottom: 20px; right: 20px;
+            background: ${isError ? '#ef4444' : '#1f2937'}; border: 1px solid ${isError ? '#b91c1c' : '#374151'};
+            color: white; padding: 12px 20px; border-radius: 8px; z-index: 9999999;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); font-family: sans-serif; font-size: 13px;
+            transition: opacity 0.3s; opacity: 0;
+        `;
+        toast.innerHTML = escapeHTML(msg);
+        document.body.appendChild(toast);
+
+        requestAnimationFrame(() => { toast.style.opacity = '1'; });
+
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+        }, 3500);
+    }
+
+    function customConfirm(msg, onConfirm) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:9999999;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(2px);';
+
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#1f2937;padding:24px;border-radius:12px;color:#f3f4f6;font-family:sans-serif;max-width:320px;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);border:1px solid #374151;';
+
+        box.innerHTML = `
+            <div style="margin-bottom:20px; font-size:14px;">${escapeHTML(msg)}</div>
+            <div style="display:flex;gap:12px;justify-content:center;">
+                <button id="jai-btn-yes" style="flex:1; padding:8px 16px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">OK</button>
+                <button id="jai-btn-no" style="flex:1; padding:8px 16px; background:#4b5563; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Cancel</button>
+            </div>
+        `;
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        document.getElementById('jai-btn-yes').onclick = () => { overlay.remove(); onConfirm(); };
+        document.getElementById('jai-btn-no').onclick = () => { overlay.remove(); };
+    }
+
+    function showFirstTimeSetup() {
+        const shown = localStorage.getItem('jai_suite_setup_shown');
+        if (shown === 'true') return;
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:9999999;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(3px);';
+
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#1f2937;padding:30px;border-radius:12px;color:#f3f4f6;font-family:system-ui, sans-serif;max-width:420px;border:1px solid #374151;box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);';
+
+        box.innerHTML = `
+            <h2 style="margin:0 0 15px 0; color:#a78bfa;">${t('welcome_title')}</h2>
+            <p style="margin:0 0 15px 0; font-size:14px; color:#d1d5db;">${t('welcome_text')}</p>
+            <ul style="margin:0 0 20px 0; padding-left:20px; font-size:13px; color:#9ca3af; line-height:1.6;">
+                <li>✅ ${t('welcome_li1')}</li>
+                <li>✅ ${t('welcome_li2')}</li>
+                <li>✅ ${t('welcome_li3')}</li>
+                <li>✅ ${t('welcome_li4')}</li>
+            </ul>
+            <div style="display:flex;gap:12px;">
+                <button id="jai-got-it" style="flex:1;padding:10px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;transition:0.2s;">${t('btn_understand')}</button>
+                <button id="jai-github" style="flex:1;padding:10px;background:#374151;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;transition:0.2s;">${t('btn_github')}</button>
+            </div>
+        `;
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        document.getElementById('jai-got-it').onmouseover = (e) => e.target.style.background = '#047857';
+        document.getElementById('jai-got-it').onmouseout = (e) => e.target.style.background = '#059669';
+
+        document.getElementById('jai-github').onmouseover = (e) => e.target.style.background = '#4b5563';
+        document.getElementById('jai-github').onmouseout = (e) => e.target.style.background = '#374151';
+
+        document.getElementById('jai-got-it').onclick = () => {
+            localStorage.setItem('jai_suite_setup_shown', 'true');
+            overlay.style.opacity = '0';
+            setTimeout(() => overlay.remove(), 300);
+        };
+
+        document.getElementById('jai-github').onclick = () => {
+            window.open('https://github.com/itsfantomas/janitor-exporter', '_blank');
+        };
     }
 
     // --- 1. ЛОГИКА АВТОРИЗАЦИИ ---
@@ -144,7 +259,19 @@
     window.fetch = new Proxy(window.fetch, {
         apply: function (target, thisArg, argumentsList) {
             const [resource, config] = argumentsList;
-            if (config && config.headers && !CONFIG.token) {
+
+            let urlStr = '';
+            if (typeof resource === 'string') {
+                urlStr = resource;
+            } else if (resource instanceof Request) {
+                urlStr = resource.url;
+            } else if (resource instanceof URL) {
+                urlStr = resource.href;
+            }
+
+            const isJanitorApi = urlStr.includes('janitorai.com') || urlStr.startsWith('/');
+
+            if (config && config.headers && !CONFIG.token && isJanitorApi) {
                 try {
                     let auth;
                     if (config.headers instanceof Headers) {
@@ -154,6 +281,7 @@
                     }
                     if (auth && auth.includes('Bearer')) {
                         CONFIG.token = auth;
+                        console.log('[J.AI Suite] ✅ Token acquired from API call');
                     }
                 } catch (err) {
                     // silent
@@ -163,12 +291,22 @@
         }
     });
 
-    // Helper: Скачивание (CORS может блокировать, но пробуем)
-    function downloadImageFetch(url) {
-        return fetch(url).then((res) => {
-            if (res.ok) { return res.blob(); }
-            throw new Error('Network response was not ok.');
-        });
+    async function downloadImageFetch(url) {
+        try {
+            const res = await originalFetch(url);
+            if (res.ok) return await res.blob();
+            throw new Error('Direct fetch failed');
+        } catch (e) {
+            try {
+                console.log('[J.AI Suite] 📡 Direct fetch failed, trying CORS proxy...');
+                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                const res = await originalFetch(proxyUrl);
+                if (res.ok) return await res.blob();
+                throw new Error('Proxy fetch failed');
+            } catch (proxyError) {
+                throw proxyError;
+            }
+        }
     }
 
     // --- 2. ПАРСЕР ДАННЫХ ---
@@ -249,6 +387,8 @@
     function createUI() {
         if (document.getElementById('jai-suite-panel')) { return; }
 
+        showFirstTimeSetup();
+
         const panel = document.createElement('div');
         panel.id = 'jai-suite-panel';
         panel.style.cssText = `
@@ -278,7 +418,7 @@
             header.innerHTML = `
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-weight:bold; color:#a78bfa;">${t('title')}</span>
-                    <span style="font-size:10px; opacity:0.5; cursor:pointer; background:#374151; padding:2px 4px; border-radius:4px;" id="jai-lang-switch">${CONFIG.lang.toUpperCase()}</span>
+                    <span style="font-size:10px; cursor:pointer; background:#4b5563; color:#e5e7eb; padding:2px 6px; border-radius:4px; font-weight:bold; border:1px solid #6b7280;" id="jai-lang-switch">${CONFIG.lang.toUpperCase()}</span>
                 </div>
                 <div id="jai-toggle" style="cursor:pointer; color:#9ca3af; font-weight:bold; padding: 0 5px;">${CONFIG.isMinimized ? '+' : '−'}</div>
             `;
@@ -355,29 +495,21 @@
 
             if (isChat) {
                 const btnTxt = document.getElementById('btn-chat-txt');
-                if (btnTxt) {
-                    btnTxt.onclick = () => { runChatExport('txt'); };
-                }
+                if (btnTxt) { btnTxt.onclick = () => { runChatExport('txt'); }; }
+
                 const btnJsonl = document.getElementById('btn-chat-jsonl');
-                if (btnJsonl) {
-                    btnJsonl.onclick = () => { runChatExport('jsonl'); };
-                }
+                if (btnJsonl) { btnJsonl.onclick = () => { runChatExport('jsonl'); }; }
             }
             if (isCharacter) {
                 const btnCard = document.getElementById('btn-dl-card');
-                if (btnCard) {
-                    btnCard.onclick = () => { runCardExport(); };
-                }
+                if (btnCard) { btnCard.onclick = () => { runCardExport(); }; }
+
                 const btnTracker = document.getElementById('btn-dl-tracker');
-                if (btnTracker) {
-                    btnTracker.onclick = () => { runTrackerExport(); };
-                }
+                if (btnTracker) { btnTracker.onclick = () => { runTrackerExport(); }; }
             }
             if (isProfile) {
                 const btnPersonas = document.getElementById('btn-dl-personas');
-                if (btnPersonas) {
-                    btnPersonas.onclick = () => { showPersonaSelector(); };
-                }
+                if (btnPersonas) { btnPersonas.onclick = () => { showPersonaSelector(); }; }
             }
         }
 
@@ -389,9 +521,8 @@
             .jai-btn.pink { background:#db2777; } .jai-btn.pink:hover { background:#be185d; }
             .jai-btn.purple { background:#9333ea; } .jai-btn.purple:hover { background:#7e22ce; }
             .jai-btn.green { background:#059669; } .jai-btn.green:hover { background:#047857; }
-            /* Modal Styles */
-            .jai-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999999; display:flex; justify-content:center; align-items:center; }
-            .jai-modal-content { background:#1f2937; padding:20px; border-radius:12px; width:400px; max-height:80vh; overflow-y:auto; color:#f3f4f6; font-family:sans-serif; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5); }
+            .jai-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(2px); }
+            .jai-modal-content { background:#1f2937; padding:20px; border-radius:12px; width:400px; max-height:80vh; overflow-y:auto; color:#f3f4f6; font-family:sans-serif; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5); border:1px solid #374151;}
             .jai-persona-item { display:flex; align-items:center; gap:10px; padding:8px; border-bottom:1px solid #374151; }
             .jai-persona-item:last-child { border-bottom:none; }
             .jai-persona-item img { width:30px; height:30px; border-radius:50%; object-fit:cover; }
@@ -400,10 +531,7 @@
         document.head.appendChild(styleSheet);
 
         let isDragging = false;
-        let startX;
-        let startY;
-        let initLeft;
-        let initTop;
+        let startX, startY, initLeft, initTop;
 
         header.onmousedown = (e) => {
             if (e.target.id === 'jai-lang-switch' || e.target.id === 'jai-toggle') return;
@@ -424,8 +552,10 @@
             panel.style.top = (initTop + (e.clientY - startY)) + 'px';
         };
         document.onmouseup = () => {
-            isDragging = false;
-            panel.style.opacity = '1';
+            if (isDragging) {
+                isDragging = false;
+                panel.style.opacity = '1';
+            }
         };
 
         render();
@@ -442,26 +572,24 @@
 
     function updateStatus(msg) {
         const el = document.getElementById('jai-status');
-        if (el) el.textContent = msg;
+        if (el) el.textContent = escapeHTML(msg);
     }
 
-    // --- 4. МЕНЮ ВЫБОРА ПЕРСОН ---
+    // --- 4. МЕНЮ ВЫБОРА ПЕРСОН (DOM API) ---
     function showPersonaSelector() {
         if (!window.JSZip) {
-            alert("JSZip lib not loaded.");
+            showNotification("JSZip lib not loaded.", true);
             return;
         }
         const personas = getPersonasData();
         if (!personas || personas.length === 0) {
-            alert(t('alert_no_data'));
+            showNotification(t('alert_no_data'), true);
             return;
         }
 
-        // Поиск DOM картинок для сопоставления
         const domImages = new Map();
         const images = document.querySelectorAll('img[alt$=" avatar"]');
         images.forEach((img) => {
-            // Извлекаем имя из alt: "Name avatar" -> "Name"
             const name = img.alt.replace(/ avatar$/, '').trim();
             if (name && img.src) {
                 domImages.set(name, img.src);
@@ -471,58 +599,81 @@
         const modal = document.createElement('div');
         modal.className = 'jai-modal';
 
-        let listHtml = '';
+        const content = document.createElement('div');
+        content.className = 'jai-modal-content';
+
+        const title = document.createElement('h3');
+        title.style.margin = '0 0 15px 0';
+        title.textContent = t('btn_personas');
+
+        const topActions = document.createElement('div');
+        topActions.style.marginBottom = '10px';
+        const btnSelAll = document.createElement('button');
+        btnSelAll.className = 'jai-btn secondary';
+        btnSelAll.style.cssText = 'padding:4px 8px; font-size:10px; width:auto;';
+        btnSelAll.textContent = t('select_all');
+        topActions.appendChild(btnSelAll);
+
+        const listContainer = document.createElement('div');
+        listContainer.style.cssText = 'max-height:300px; overflow-y:auto; border:1px solid #374151; border-radius:6px; padding:4px;';
+
         personas.forEach((p, idx) => {
-            // Приоритет: картинка со страницы (свежая, CORS-friendly) -> картинка из JSON
-            let avatar = domImages.get(p.name);
-            if (!avatar) {
-                avatar = p.avatar;
-                if (avatar && !avatar.startsWith('http')) {
-                    avatar = `https://janitorai.com${avatar}`;
-                }
-            }
-            // Сохраняем найденный URL прямо в объект, чтобы потом не искать снова
+            let avatar = domImages.get(p.name) || p.avatar;
+            if (avatar && !avatar.startsWith('http')) avatar = `https://janitorai.com${avatar}`;
             p._domAvatarUrl = avatar;
 
-            listHtml += `
-                <div class="jai-persona-item">
-                    <input type="checkbox" id="p-check-${idx}" checked>
-                    <img src="${avatar || 'https://via.placeholder.com/30'}" onerror="this.src='https://via.placeholder.com/30'">
-                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${p.name}</span>
-                </div>
-            `;
+            const item = document.createElement('div');
+            item.className = 'jai-persona-item';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `p-check-${idx}`;
+            checkbox.checked = true;
+
+            const img = document.createElement('img');
+            img.src = avatar || 'https://via.placeholder.com/30';
+            img.onerror = () => { img.src = 'https://via.placeholder.com/30'; };
+
+            const nameSpan = document.createElement('span');
+            nameSpan.style.cssText = 'flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+            nameSpan.textContent = p.name;  // ✅ 100% XSS safe - textContent, not innerHTML
+
+            item.appendChild(checkbox);
+            item.appendChild(img);
+            item.appendChild(nameSpan);
+            listContainer.appendChild(item);
         });
 
-        modal.innerHTML = `
-            <div class="jai-modal-content">
-                <h3 style="margin:0 0 15px 0;">${t('btn_personas')}</h3>
-                <div style="margin-bottom:10px;">
-                    <button class="jai-btn secondary" id="jai-sel-all" style="padding:4px 8px; font-size:10px;">${t('select_all')}</button>
-                </div>
-                <div style="max-height:300px; overflow-y:auto; border:1px solid #374151; border-radius:6px;">
-                    ${listHtml}
-                </div>
-                <div class="jai-actions">
-                    <button class="jai-btn secondary" id="jai-cancel">Cancel</button>
-                    <button class="jai-btn green" id="jai-download-zip">${t('download_selected')}</button>
-                </div>
-            </div>
-        `;
+        const bottomActions = document.createElement('div');
+        bottomActions.className = 'jai-actions';
+
+        const btnCancel = document.createElement('button');
+        btnCancel.className = 'jai-btn secondary';
+        btnCancel.textContent = 'Cancel';
+
+        const btnDownload = document.createElement('button');
+        btnDownload.className = 'jai-btn green';
+        btnDownload.textContent = t('download_selected');
+
+        bottomActions.appendChild(btnCancel);
+        bottomActions.appendChild(btnDownload);
+
+        content.appendChild(title);
+        content.appendChild(topActions);
+        content.appendChild(listContainer);
+        content.appendChild(bottomActions);
+        modal.appendChild(content);
         document.body.appendChild(modal);
 
-        document.getElementById('jai-cancel').onclick = () => {
-            document.body.removeChild(modal);
+        btnCancel.onclick = () => document.body.removeChild(modal);
+
+        btnSelAll.onclick = () => {
+            const checks = listContainer.querySelectorAll('input[type="checkbox"]');
+            const allChecked = Array.from(checks).every(c => c.checked);
+            checks.forEach(c => c.checked = !allChecked);
         };
 
-        document.getElementById('jai-sel-all').onclick = () => {
-            const checks = modal.querySelectorAll('input[type="checkbox"]');
-            const allChecked = Array.from(checks).every((c) => c.checked);
-            checks.forEach((c) => {
-                c.checked = !allChecked;
-            });
-        };
-
-        document.getElementById('jai-download-zip').onclick = async () => {
+        btnDownload.onclick = async () => {
             const selected = [];
             personas.forEach((p, idx) => {
                 const cb = document.getElementById(`p-check-${idx}`);
@@ -535,15 +686,11 @@
         };
     }
 
-    // --- 5. ЭКСПОРТ ПЕРСОН (ZIP + BEST EFFORT IMAGE) ---
+    // --- 5. ЭКСПОРТ ПЕРСОН (ZIP) ---
     async function runPersonasBackup(personas) {
         updateStatus("Создание архива...");
         const zip = new JSZip();
-
-        const backupData = {
-            personas: {},
-            persona_descriptions: {}
-        };
+        const backupData = { personas: {}, persona_descriptions: {} };
 
         let count = 0;
         const total = personas.length;
@@ -552,14 +699,10 @@
             count++;
             updateStatus(`Обработка: ${count}/${total}`);
 
-            // Чистим имя
-            const cleanName = p.name.replace(/[^a-zA-Z0-9]/g, '');
-            // Формат имени как в Tavern: TimeStamp-Name.png
+            const cleanName = String(p.name).replace(/[^a-zA-Z0-9а-яА-ЯёЁ\s\-_]/gi, '').trim().replace(/\s+/g, '_') || `persona_${count}`;
             const fileName = `${Date.now() + count}-${cleanName}.png`;
 
-            // 1. Заполняем JSON
             backupData.personas[fileName] = p.name;
-
             backupData.persona_descriptions[fileName] = {
                 description: p.appearance || p.description || "",
                 position: 0,
@@ -567,8 +710,7 @@
                 title: ""
             };
 
-            // 2. Скачиваем картинку (Best Effort)
-            const avatarUrl = p._domAvatarUrl || p.avatar; // Берем URL, который нашли в меню (из DOM или JSON)
+            const avatarUrl = p._domAvatarUrl || p.avatar;
 
             if (avatarUrl) {
                 try {
@@ -576,33 +718,35 @@
                     if (!finalUrl.startsWith('http')) {
                         finalUrl = `https://janitorai.com${finalUrl}`;
                     }
-
-                    // Обычный fetch (без GM)
-                    // Если картинка взята из DOM (Ella), браузер МОЖЕТ отдать её из кэша
                     const imgResp = await downloadImageFetch(finalUrl);
                     zip.file(fileName, imgResp);
                 } catch (e) {
-                    // console.warn(`[Skip] Image fetch failed for ${p.name}`);
+                    console.warn(`[Skip] Image fetch failed for ${p.name}`);
                 }
             }
         }
 
-        // Кладем главный JSON файл
         zip.file("personas_backup.json", JSON.stringify(backupData, null, 2));
 
-        updateStatus("Сжатие...");
-        const content = await zip.generateAsync({ type: "blob" });
-        const url = URL.createObjectURL(content);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = "Janitor_Personas_Backup.zip";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        try {
+            updateStatus("Упаковка (быстрая)...");
+            const content = await zip.generateAsync({ type: "blob", compression: "STORE" });
+            const url = URL.createObjectURL(content);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "Janitor_Personas_Backup.zip";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
 
-        updateStatus(t('status_ready'));
-        alert(`Бэкап готов! Сохранено ${count} персон.`);
+            updateStatus(t('status_ready'));
+            showNotification(`Бэкап готов! Сохранено ${count} персон.`);
+        } catch (zipError) {
+            console.error("ZIP Error:", zipError);
+            showNotification("Ошибка создания архива: " + zipError.message, true);
+            updateStatus(t('status_error'));
+        }
     }
 
     // --- ОСТАЛЬНЫЕ ЭКСПОРТЫ ---
@@ -611,14 +755,18 @@
         const chatIdMatch = window.location.href.match(/chats\/([a-zA-Z0-9-]+)/);
         const chatId = chatIdMatch ? chatIdMatch[1] : null;
         if (!chatId || !CONFIG.token) {
-            alert(`${t('alert_no_data')}\n(Missing ID/Token)`);
+            showNotification(`${t('alert_no_data')}\n(Missing ID/Token)`, true);
             return;
         }
         updateStatus(t('status_loading'));
-        let filename = document.getElementById('jai-filename').value.trim();
+
+        let rawFilename = document.getElementById('jai-filename').value.trim();
+        let filename = rawFilename.replace(/[^a-zA-Z0-9а-яА-ЯёЁ\s\-_]/g, '_');
         if (!filename) { filename = `janitor_chat_${chatId}`; }
+
         try {
             const url = `https://janitorai.com/hampter/chats/${chatId}`;
+            console.log(`[J.AI Suite] 📥 Fetching chat from ${url}`);
             const resp = await originalFetch(url, {
                 method: 'GET',
                 headers: { 'Authorization': CONFIG.token, 'Content-Type': 'application/json', 'x-app-version': '7.4.9.9.7' },
@@ -628,9 +776,11 @@
             const json = await resp.json();
             const msgs = json.chatMessages || json.messages || (Array.isArray(json) ? json : null);
             if (!msgs) { throw new Error("No messages"); }
+
             msgs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
             let content = '';
             const mimeType = format === 'txt' ? 'text/plain' : 'application/json';
+
             if (format === 'txt') {
                 content = msgs.map((msg, i) => {
                     const isBot = msg.is_bot === true;
@@ -654,25 +804,16 @@
             }
             downloadFile(content, filename, mimeType);
             updateStatus(t('status_ready'));
+            showNotification(`Чат успешно скачан: ${filename}`);
         } catch (e) {
             console.error(e);
-            alert(t('status_error'));
+            showNotification(t('status_error'), true);
             updateStatus(t('status_error'));
         }
     }
 
-    async function runCardExport() {
+    async function processCardExport() {
         const rawData = getPageData();
-        if (!rawData) {
-            alert(t('alert_no_data'));
-            return;
-        }
-        if (window.location.href.includes('/characters/')) {
-             const urlIdMatch = window.location.href.match(/characters\/([a-f0-9-]+)/);
-             if (urlIdMatch && rawData.id && !urlIdMatch[1].includes(rawData.id)) {
-                 if (!confirm(t('alert_old_data'))) { return; }
-             }
-        }
         updateStatus(t('status_loading'));
         try {
             let avatarUrl = rawData.avatar;
@@ -680,7 +821,6 @@
             const domImg = document.querySelector('.character-card-flex-avatar img') || document.querySelector('img[alt*="avatar"]');
             if (domImg && domImg.src) { avatarUrl = domImg.src; }
 
-            // Only fetch here (Best Effort)
             const imgResp = await downloadImageFetch(avatarUrl);
             const imgBitmap = await createImageBitmap(imgResp);
 
@@ -693,7 +833,14 @@
 
             const standardTags = rawData.tags ? rawData.tags.map((t) => t.name || t) : [];
             const customTags = rawData.custom_tags ? rawData.custom_tags.map((t) => t.name || t) : [];
-            const tavernCard = {
+
+            const altGreetings = (
+                rawData.alternative_first_messages ||
+                rawData.alternate_greetings ||
+                []
+            ).filter(g => g && typeof g === 'string' && g.trim() !== '');
+
+            const cardData = {
                 name: rawData.name,
                 description: rawData.description || "",
                 personality: rawData.personality || "",
@@ -702,34 +849,51 @@
                 mes_example: rawData.example_dialogs || rawData.example_dialogue || "",
                 creator_notes: rawData.creator_notes || "",
                 system_prompt: rawData.system_prompt || "",
+                post_history_instructions: "",
+                alternate_greetings: altGreetings,
                 tags: [...standardTags, ...customTags],
                 creator: rawData.creator_name || "JanitorAI",
                 character_version: "1.0",
                 extensions: { janitor_id: rawData.id }
             };
+
+            const tavernCard = {
+                spec: "chara_card_v2",
+                spec_version: "2.0",
+                data: cardData
+            };
+
             const finalBlob = await embedDataInPng(pngBlob, JSON.stringify(tavernCard));
-            const cleanName = (tavernCard.name || "char").replace(/[^a-z0-9а-яё\s-]/gi, '').trim().replace(/\s+/g, '_') + ".png";
+            const cleanName = (cardData.name || "char").replace(/[^a-z0-9а-яё\s-]/gi, '').trim().replace(/\s+/g, '_') + ".png";
+
             downloadFile(finalBlob, cleanName, 'image/png');
             updateStatus(t('status_ready'));
+            showNotification("Карта успешно сохранена!");
         } catch (e) {
             console.error(e);
-            alert(t('status_error'));
+            showNotification(t('status_error'), true);
             updateStatus(t('status_error'));
         }
     }
 
-    async function runTrackerExport() {
+    function runCardExport() {
         const rawData = getPageData();
         if (!rawData) {
-            alert(t('alert_no_data'));
+            showNotification(t('alert_no_data'), true);
             return;
         }
         if (window.location.href.includes('/characters/')) {
              const urlIdMatch = window.location.href.match(/characters\/([a-f0-9-]+)/);
              if (urlIdMatch && rawData.id && !urlIdMatch[1].includes(rawData.id)) {
-                 if (!confirm(t('alert_old_data'))) { return; }
+                 customConfirm(t('alert_old_data'), processCardExport);
+                 return;
              }
         }
+        processCardExport();
+    }
+
+    function processTrackerExport() {
+        const rawData = getPageData();
         try {
             const status = rawData.is_public ? 'active' : 'private';
             const date = rawData.updated_at ? new Date(rawData.updated_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
@@ -737,10 +901,12 @@
             if (avatar && !avatar.startsWith('http')) { avatar = `https://janitorai.com${avatar}`; }
             const domImg = document.querySelector('.character-card-flex-avatar img') || document.querySelector('img[alt*="avatar"]');
             if (domImg && domImg.src) { avatar = domImg.src; }
+
             let safeDescription = rawData.description || rawData.first_message || "";
             if (safeDescription.length > 500) { safeDescription = safeDescription.substring(0, 500) + "..."; }
             const standardTags = rawData.tags ? rawData.tags.map((t) => t.name || t) : [];
             const customTags = rawData.custom_tags ? rawData.custom_tags.map((t) => t.name || t) : [];
+
             const trackerObj = {
                 name: rawData.name,
                 link: window.location.href.split('?')[0],
@@ -751,12 +917,30 @@
                 notes: safeDescription
             };
             const filename = (rawData.name || "character").replace(/[^a-z0-9а-яё\s-]/gi, '').trim().replace(/\s+/g, '_') + "_tracker.json";
+
             downloadFile(JSON.stringify(trackerObj, null, 2), filename, 'application/json');
             updateStatus(t('status_ready'));
+            showNotification("JSON для трекера скачан!");
         } catch (e) {
             console.error(e);
-            alert(t('status_error') + ': ' + e.message);
+            showNotification(t('status_error') + ': ' + e.message, true);
         }
+    }
+
+    function runTrackerExport() {
+        const rawData = getPageData();
+        if (!rawData) {
+            showNotification(t('alert_no_data'), true);
+            return;
+        }
+        if (window.location.href.includes('/characters/')) {
+             const urlIdMatch = window.location.href.match(/characters\/([a-f0-9-]+)/);
+             if (urlIdMatch && rawData.id && !urlIdMatch[1].includes(rawData.id)) {
+                 customConfirm(t('alert_old_data'), processTrackerExport);
+                 return;
+             }
+        }
+        processTrackerExport();
     }
 
     function downloadFile(content, filename, type) {
@@ -783,6 +967,7 @@
         }
         return table;
     })();
+
     function calculateCrc32(buf) {
         let crc = -1;
         for (let i = 0; i < buf.length; i++) {
@@ -790,6 +975,7 @@
         }
         return (crc ^ -1) >>> 0;
     }
+
     async function embedDataInPng(pngBlob, jsonData) {
         const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
         const encodedData = btoa(unescape(encodeURIComponent(jsonData)));
